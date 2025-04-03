@@ -181,10 +181,10 @@ export async function swapWithJupiter(
   amount: string,
   userPublicKey: string
 ) {
-  const REFERRAL_ACCOUNT = {
-    pubkey: "GZhgKLJgPRno84ywBVTVqKMz8JwTJiZDtcGyQww1G5d",
-    feeBps: 100, // 1% fee
-    feeShareBps: 10000, // 100% to referrer (adjust as needed)
+  const SIGNER_ACCOUNT = {
+    pubkey: process.env.SIGNER_PUB_KEY,
+    fBps: 100,
+    fShareBps: 10000,
   };
 
   const wallet = user;
@@ -201,9 +201,9 @@ export async function swapWithJupiter(
       {
         response,
         userPublicKey: userPublicKey,
-        referralAccount: REFERRAL_ACCOUNT.pubkey,
-        feeBps: REFERRAL_ACCOUNT.feeBps,
-        feeShareBps: REFERRAL_ACCOUNT.feeShareBps,
+        referralAccount: SIGNER_ACCOUNT.pubkey,
+        feeBps: SIGNER_ACCOUNT.fBps,
+        feeShareBps: SIGNER_ACCOUNT.fShareBps,
       },
       {
         headers: {
@@ -216,12 +216,29 @@ export async function swapWithJupiter(
     const swapTransaction = Transaction.from(
       Buffer.from(swapResponse.data.swapTransaction, "base64")
     );
-    const signedTx = await swapTransaction.sign(wallet);
-    const txid = await connection.sendRawTransaction(signedTx.serialize());
+    // const signedTx = await swapTransaction.sign(wallet);
+    // const txid = await connection.sendRawTransaction(signedTx.serialize());
+    // const latestBlockhash = await connection.getLatestBlockhash("finalized");
+    // await connection.confirmTransaction(
+    //   {
+    //     signature: signedTx,
+    //     blockhash: latestBlockhash.blockhash,
+    //     lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+    //   },
+    //   "finalized"
+    // );
+
+    // return txid;
+
+    swapTransaction.sign(wallet); // For Keypair
+    const txid = await connection.sendRawTransaction(
+      swapTransaction.serialize()
+    );
+
     const latestBlockhash = await connection.getLatestBlockhash("finalized");
     await connection.confirmTransaction(
       {
-        signature: signedTx,
+        signature: txid,
         blockhash: latestBlockhash.blockhash,
         lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
       },
