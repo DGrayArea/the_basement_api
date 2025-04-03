@@ -4,7 +4,13 @@ import { DLMM } from "../dlmm";
 import { BinArrayAccount, LbPosition } from "../dlmm/types";
 import { BN } from "bn.js";
 import { convertToPosition } from "./utils";
-import { dlmmBalancePosition, dlmmStake, dlmmSwap, swap } from "../utils";
+import {
+  dlmmBalancePosition,
+  dlmmStake,
+  dlmmSwap,
+  swap,
+  swapWithJupiter,
+} from "../utils";
 import { getActiveBin } from "../examples/example";
 import { config } from "dotenv";
 
@@ -67,24 +73,30 @@ app.post("/dlmm/stake", async (req, res) => {
   );
 
   try {
-    const swapResponse = await swap(
-      dlmmPool,
+    // const swapResponse = await swap(
+    //   dlmmPool,
+    //   req.connect,
+    //   Number(req.body.swapAmount),
+    //   // req.body.swapYtoX
+    //   !swapYToX
+    // );
+    const swapResponse = await swapWithJupiter(
       req.connect,
-      Number(req.body.swapAmount),
-      // req.body.swapYtoX
-      !swapYToX
+      req.body.tokenA,
+      req.body.tokenB,
+      req.body.swapAmount
     );
     if (swapResponse) {
-      // const stakeResponse = await dlmmBalancePosition(
-      //   activeBin,
-      //   dlmmPool,
-      //   req.connect,
-      //   newOneSidePosition,
-      //   req.body.stakeAmount
-      // );
+      const stakeResponse = await dlmmBalancePosition(
+        activeBin,
+        dlmmPool,
+        req.connect,
+        newOneSidePosition,
+        req.body.stakeAmount
+      );
       return res.status(400).send({
         swapResponse,
-        // stakeResponse,
+        stakeResponse,
       });
     } else {
       return res.status(400).send(swapResponse);

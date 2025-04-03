@@ -178,8 +178,7 @@ export async function swapWithJupiter(
   connection: Connection,
   tokenAMint: string,
   tokenBMint: string,
-  amount: string,
-  userPublicKey: string
+  amount: string
 ) {
   const SIGNER_ACCOUNT = {
     pubkey: process.env.SIGNER_PUB_KEY,
@@ -200,7 +199,7 @@ export async function swapWithJupiter(
       "https://api.jup.ag/v1/swap",
       {
         response,
-        userPublicKey: userPublicKey,
+        userPublicKey: wallet.publicKey,
         referralAccount: SIGNER_ACCOUNT.pubkey,
         feeBps: SIGNER_ACCOUNT.fBps,
         feeShareBps: SIGNER_ACCOUNT.fShareBps,
