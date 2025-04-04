@@ -52,20 +52,25 @@ app.post("/dlmm/stake", async (req, res) => {
     const newOneSidePosition = new web3_js_1.Keypair();
     const swapYToX = dlmmPool.tokenY.publicKey.equals(new web3_js_1.PublicKey("So11111111111111111111111111111111111111112"));
     try {
-        const swapResponse = await (0, utils_2.swap)(dlmmPool, req.connect, Number(req.body.swapAmount), 
-        // req.body.swapYtoX
-        !swapYToX);
+        // const swapResponse = await swap(
+        //   dlmmPool,
+        //   req.connect,
+        //   Number(req.body.swapAmount),
+        //   // req.body.swapYtoX
+        //   !swapYToX
+        // );
+        const swapResponse = true;
+        // await swapWithJupiter(
+        //   req.connect,
+        //   req.body.tokenA,
+        //   req.body.tokenB,
+        //   req.body.swapAmount
+        // );
         if (swapResponse) {
-            // const stakeResponse = await dlmmBalancePosition(
-            //   activeBin,
-            //   dlmmPool,
-            //   req.connect,
-            //   newOneSidePosition,
-            //   req.body.stakeAmount
-            // );
+            const stakeResponse = await (0, utils_2.dlmmBalancePosition)(activeBin, dlmmPool, req.connect, newOneSidePosition, req.body.stakeAmount);
             return res.status(400).send({
                 swapResponse,
-                // stakeResponse,
+                stakeResponse,
             });
         }
         else {

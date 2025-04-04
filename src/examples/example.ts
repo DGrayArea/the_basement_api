@@ -295,7 +295,7 @@ async function main() {
   });
 
   await getActiveBin(dlmmPool);
-  await swap(dlmmPool);
+  // await swap(dlmmPool);
   // await createBalancePosition(dlmmPool);
   // await createImbalancePosition(dlmmPool);
   // await createOneSidePosition(dlmmPool);

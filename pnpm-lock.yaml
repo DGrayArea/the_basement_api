@@ -76,7 +76,7 @@ importers:
         specifier: ^6.7.0
         version: 6.7.0(typescript@5.5.4)
       typescript:
-        specifier: ^5.0.4
+        specifier: ^5.5.4
         version: 5.5.4
 
 packages:

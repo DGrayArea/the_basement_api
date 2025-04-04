@@ -185,39 +185,40 @@ async function removePositionLiquidity(dlmmPool) {
 }
 async function swap(dlmmPool) {
     //1000000 = 1
-    const swapAmount = new bn_js_1.default(100);
+    const swapAmount = new bn_js_1.default(100000);
     // Swap quote
-    const swapYtoX = true;
+    const swapYtoX = false;
     const binArrays = await dlmmPool.getBinArrayForSwap(swapYtoX);
     const swapQuote = await dlmmPool.swapQuote(swapAmount, swapYtoX, new bn_js_1.default(10), binArrays);
-    console.log(dlmmPool.tokenX.publicKey, dlmmPool.tokenY.publicKey);
+    // console.log(dlmmPool.tokenX.publicKey, dlmmPool.tokenY.publicKey);
     // console.log("🚀 ~ swapQuote:", swapQuote);
     // Swap
-    // const swapTx = await dlmmPool.swap({
-    //   inToken: dlmmPool.tokenX.publicKey,
-    //   binArraysPubkey: swapQuote.binArraysPubkey,
-    //   inAmount: swapAmount,
-    //   lbPair: dlmmPool.pubkey,
-    //   user: user.publicKey,
-    //   minOutAmount: swapQuote.minOutAmount,
-    //   outToken: dlmmPool.tokenY.publicKey,
-    // });
-    // try {
-    //   const swapTxHash = await sendAndConfirmTransaction(connection, swapTx, [
-    //     user,
-    //   ]);
-    //   console.log("🚀 ~ swapTxHash:", swapTxHash);
-    // } catch (error) {
-    //   console.log("🚀 ~ error:", JSON.parse(JSON.stringify(error)));
-    // }
+    const swapTx = await dlmmPool.swap({
+        inToken: dlmmPool.tokenX.publicKey,
+        binArraysPubkey: swapQuote.binArraysPubkey,
+        inAmount: swapAmount,
+        lbPair: dlmmPool.pubkey,
+        user: exports.user.publicKey,
+        minOutAmount: swapQuote.minOutAmount,
+        outToken: dlmmPool.tokenY.publicKey,
+    });
+    try {
+        const swapTxHash = await (0, web3_js_1.sendAndConfirmTransaction)(connection, swapTx, [
+            exports.user,
+        ]);
+        console.log("🚀 ~ swapTxHash:", swapTxHash);
+    }
+    catch (error) {
+        console.log("🚀 ~ error:", JSON.parse(JSON.stringify(error)));
+    }
 }
 async function main() {
     const dlmmPool = await dlmm_1.DLMM.create(connection, poolAddress, {
         cluster: "devnet",
     });
     await getActiveBin(dlmmPool);
-    // await swap(dlmmPool);
-    await createBalancePosition(dlmmPool);
+    await swap(dlmmPool);
+    // await createBalancePosition(dlmmPool);
     // await createImbalancePosition(dlmmPool);
     // await createOneSidePosition(dlmmPool);
     // await getPositionsState(dlmmPool);

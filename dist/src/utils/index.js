@@ -1,7 +1,11 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.swap = exports.dlmmStake = exports.dlmmSwap = void 0;
 exports.dlmmBalancePosition = dlmmBalancePosition;
+exports.swapWithJupiter = swapWithJupiter;
 const web3_js_1 = require("@solana/web3.js");
 const bn_js_1 = require("bn.js");
 const server_1 = require("../server");
@@ -9,7 +13,9 @@ const dlmm_1 = require("../dlmm");
 const example_1 = require("../examples/example");
 const types_1 = require("../dlmm/types");
 const dotenv_1 = require("dotenv");
+const axios_1 = __importDefault(require("axios"));
 (0, dotenv_1.config)();
+// 9999999999999999999999000000000000000000000
 const dlmmSwap = async (req) => {
     try {
         const inToken = new web3_js_1.PublicKey(req.body.inToken);
@@ -70,7 +76,6 @@ const dlmmStake = async (req) => {
 };
 exports.dlmmStake = dlmmStake;
 const swap = async (dlmmPool, connection, amount, swapYtoX) => {
-    console.log(swapYtoX);
     const swapAmount = new bn_js_1.BN(amount);
     // Swap quote
     const binArrays = await dlmmPool.getBinArrayForSwap(swapYtoX);
@@ -128,6 +133,58 @@ async function dlmmBalancePosition(activeBin, dlmmPool, connection, newBalancePo
         return createBalancePositionTxHash;
     }
     catch (error) {
+        return { error: error };
+    }
+}
+async function swapWithJupiter(connection, tokenAMint, tokenBMint, amount) {
+    const SIGNER_ACCOUNT = {
+        pubkey: process.env.SIGNER_PUB_KEY,
+        fBps: 100,
+        fShareBps: 10000,
+    };
+    const wallet = example_1.user;
+    try {
+        // Step 1: Get swap quote with 1% fee
+        const quoteResponse = await axios_1.default.get(`https://api.jup.ag/v1/quote?inputMint=${tokenAMint}&outputMint=${tokenBMint}&amount=${amount}&slippageBps=50&feeBps=100`);
+        const response = await quoteResponse.data;
+        // Step 2: Prepare swap transaction
+        const swapResponse = await axios_1.default.post("https://api.jup.ag/v1/swap", {
+            response,
+            userPublicKey: wallet.publicKey,
+            referralAccount: SIGNER_ACCOUNT.pubkey,
+            feeBps: SIGNER_ACCOUNT.fBps,
+            feeShareBps: SIGNER_ACCOUNT.fShareBps,
+        }, {
+            headers: {
+                "Content-Type": "application/json",
+            },
+        });
+        // Step 3: Execute swap
+        const swapTransaction = web3_js_1.Transaction.from(Buffer.from(swapResponse.data.swapTransaction, "base64"));
+        // const signedTx = await swapTransaction.sign(wallet);
+        // const txid = await connection.sendRawTransaction(signedTx.serialize());
+        // const latestBlockhash = await connection.getLatestBlockhash("finalized");
+        // await connection.confirmTransaction(
+        //   {
+        //     signature: signedTx,
+        //     blockhash: latestBlockhash.blockhash,
+        //     lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+        //   },
+        //   "finalized"
+        // );
+        // return txid;
+        swapTransaction.sign(wallet); // For Keypair
+        const txid = await connection.sendRawTransaction(swapTransaction.serialize());
+        const latestBlockhash = await connection.getLatestBlockhash("finalized");
+        await connection.confirmTransaction({
+            signature: txid,
+            blockhash: latestBlockhash.blockhash,
+            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+        }, "finalized");
+        return txid;
+    }
+    catch (error) {
+        console.error("Swap failed:", error);
         return { error: error };
     }
 }

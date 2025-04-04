@@ -80,12 +80,13 @@ app.post("/dlmm/stake", async (req, res) => {
     //   // req.body.swapYtoX
     //   !swapYToX
     // );
-    const swapResponse = await swapWithJupiter(
-      req.connect,
-      req.body.tokenA,
-      req.body.tokenB,
-      req.body.swapAmount
-    );
+    const swapResponse = true;
+    // await swapWithJupiter(
+    //   req.connect,
+    //   req.body.tokenA,
+    //   req.body.tokenB,
+    //   req.body.swapAmount
+    // );
     if (swapResponse) {
       const stakeResponse = await dlmmBalancePosition(
         activeBin,
