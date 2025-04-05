@@ -217,7 +217,7 @@ async function main() {
         cluster: "devnet",
     });
     await getActiveBin(dlmmPool);
-    await swap(dlmmPool);
+    // await swap(dlmmPool);
     // await createBalancePosition(dlmmPool);
     // await createImbalancePosition(dlmmPool);
     // await createOneSidePosition(dlmmPool);

@@ -3,9 +3,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.swap = exports.dlmmStake = exports.dlmmSwap = void 0;
+exports.getUserState = exports.recordUserShares = exports.swap = exports.dlmmStake = exports.dlmmSwap = void 0;
 exports.dlmmBalancePosition = dlmmBalancePosition;
 exports.swapWithJupiter = swapWithJupiter;
+exports.handleDepositAndCalculateShares = handleDepositAndCalculateShares;
 const web3_js_1 = require("@solana/web3.js");
 const bn_js_1 = require("bn.js");
 const server_1 = require("../server");
@@ -188,3 +189,105 @@ async function swapWithJupiter(connection, tokenAMint, tokenBMint, amount) {
         return { error: error };
     }
 }
+async function handleDepositAndCalculateShares(walletAddress, solAmount, poolState, redis) {
+    console.log("Start here");
+    const solToKeep = solAmount * 0.5;
+    const tokensFromSwap = solToKeep * poolState.currentPrice;
+    const swapFee = tokensFromSwap * 0.003;
+    const tokensReceived = tokensFromSwap - swapFee;
+    const contributionValue = solToKeep + tokensReceived / poolState.currentPrice;
+    const lpValueBefore = poolState.totalSOL + poolState.totalTokens / poolState.currentPrice;
+    // 🔄 Fetch total share points from Redis
+    let totalSharePoints = parseFloat(await redis.get("pool:totalSharePoints")) || 0;
+    let sharePoints = 0;
+    if (totalSharePoints === 0) {
+        sharePoints = contributionValue;
+    }
+    else {
+        sharePoints = (contributionValue / lpValueBefore) * totalSharePoints;
+    }
+    // Update pool state (off-chain tracking)
+    poolState.totalSOL += solToKeep;
+    poolState.totalTokens += tokensReceived;
+    // ⬆️ Update user shares and total share points in Redis
+    const shareData = await (0, exports.recordUserShares)(walletAddress, {
+        sharePoints,
+        entryPrice: poolState.currentPrice,
+        deposited: solAmount,
+    }, redis);
+    console.log(shareData);
+    // 📝 Update Redis total share points
+    await redis.set("pool:totalSharePoints", (totalSharePoints +
+        parseFloat(shareData.sharePoints) -
+        (shareData.oldShares || 0)).toFixed(8));
+    return shareData;
+}
+const recordUserShares = async (walletAddress, { sharePoints, entryPrice, deposited }, redis) => {
+    const userKey = `user:${walletAddress}`;
+    const exists = await redis.exists(userKey);
+    if (exists) {
+        const user = await redis.hGetAll(userKey);
+        const oldShares = parseFloat(user.sharePoints || "0");
+        const oldDeposited = parseFloat(user.totalDeposited || "0");
+        const oldEntryPrice = parseFloat(user.entryPrice || "0");
+        const newShareTotal = oldShares + sharePoints;
+        const newDepositTotal = oldDeposited + deposited;
+        const weightedEntryPrice = (oldEntryPrice * oldShares + entryPrice * sharePoints) / newShareTotal;
+        const oldHistory = JSON.parse(user.depositHistory || "[]");
+        const updatedHistory = [
+            ...oldHistory,
+            {
+                date: new Date().toISOString(),
+                amount: deposited,
+                shares: sharePoints,
+                entryPrice,
+            },
+        ];
+        await redis.hSet(userKey, {
+            sharePoints: newShareTotal.toFixed(8),
+            totalDeposited: newDepositTotal.toFixed(8),
+            entryPrice: weightedEntryPrice.toFixed(8),
+            depositHistory: JSON.stringify(updatedHistory),
+        });
+        return {
+            sharePoints: newShareTotal.toFixed(8),
+            totalDeposited: newDepositTotal.toFixed(8),
+            entryPrice: weightedEntryPrice.toFixed(8),
+            depositHistory: JSON.stringify(updatedHistory),
+            oldShares,
+        };
+    }
+    else {
+        const newUser = {
+            sharePoints: sharePoints.toFixed(8),
+            totalDeposited: deposited.toFixed(8),
+            entryPrice: entryPrice.toFixed(8),
+            depositHistory: JSON.stringify([
+                {
+                    date: new Date().toISOString(),
+                    amount: deposited,
+                    shares: sharePoints,
+                    entryPrice,
+                },
+            ]),
+        };
+        await redis.hSet(userKey, newUser);
+        return {
+            ...newUser,
+            oldShares: 0,
+        };
+    }
+};
+exports.recordUserShares = recordUserShares;
+const getUserState = async (walletAddress, redis) => {
+    const userKey = `user:${walletAddress}`;
+    const user = await redis.hGetAll(userKey);
+    return {
+        ...user,
+        sharePoints: parseFloat(user.sharePoints || "0"),
+        totalDeposited: parseFloat(user.totalDeposited || "0"),
+        entryPrice: parseFloat(user.entryPrice || "0"),
+        depositHistory: JSON.parse(user.depositHistory || "[]"),
+    };
+};
+exports.getUserState = getUserState;

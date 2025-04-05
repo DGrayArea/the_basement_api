@@ -12,11 +12,12 @@ const utils_1 = require("./utils");
 const utils_2 = require("../utils");
 const example_1 = require("../examples/example");
 const dotenv_1 = require("dotenv");
+const redis_1 = __importDefault(require("../utils/redis"));
 (0, dotenv_1.config)();
 const app = (0, express_1.default)();
 app.use(express_1.default.urlencoded());
 app.use(express_1.default.json());
-app.use(function (req, res, next) {
+app.use(async function (req, res, next) {
     // console.log(req.method, req.url);
     console.log(req.body);
     // req.pool = new PublicKey(req.headers.pool as string);
@@ -24,6 +25,7 @@ app.use(function (req, res, next) {
     // req.rpc = req.headers.rpc as string;
     req.rpc = "https://api.devnet.solana.com";
     req.connect = new web3_js_1.Connection(req.rpc, { commitment: "confirmed" });
+    req.redis = redis_1.default;
     next();
 });
 app.get("/", (req, res) => {
@@ -67,14 +69,30 @@ app.post("/dlmm/stake", async (req, res) => {
         //   req.body.swapAmount
         // );
         if (swapResponse) {
-            const stakeResponse = await (0, utils_2.dlmmBalancePosition)(activeBin, dlmmPool, req.connect, newOneSidePosition, req.body.stakeAmount);
+            // const stakeResponse = await dlmmBalancePosition(
+            //   activeBin,
+            //   dlmmPool,
+            //   req.connect,
+            //   newOneSidePosition,
+            //   req.body.stakeAmount
+            // );
+            // return res.status(400).send({
+            //   swapResponse,
+            //   stakeResponse,
+            // });
+            const amount = Number(req.body.amount);
+            const poolState = {
+                currentPrice: Number(req.body.poolState.currentPrice),
+                totalSOL: Number(req.body.poolState.totalSOL),
+                totalTokens: Number(req.body.poolState.totalTokens),
+            };
+            const shares = (0, utils_2.handleDepositAndCalculateShares)(req.body.userPublicKey, amount, poolState, req.redis);
             return res.status(400).send({
-                swapResponse,
-                stakeResponse,
+                shares,
             });
         }
         else {
-            return res.status(400).send(swapResponse);
+            return res.status(400).send({ error: swapResponse });
         }
     }
     catch (error) {
