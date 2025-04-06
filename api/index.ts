@@ -1,4 +1,4 @@
-import { Connection, Keypair, PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
 import express from "express";
 import { config } from "dotenv";
 // import {
@@ -20,6 +20,8 @@ import {
   handleDepositAndCalculateShares,
   handleWithdrawal,
 } from "../src/utils/shareHandlers";
+import bodyParser from "body-parser";
+import cors from "cors";
 
 config();
 declare global {
@@ -34,8 +36,17 @@ declare global {
 }
 
 const app = express();
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+  })
+);
 app.use(express.urlencoded());
 app.use(express.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json());
+
 app.use(async function (req, res, next) {
   // console.log(req.method, req.url);
   // console.log(req.body);
@@ -378,3 +389,5 @@ const gracefulShutdown = async () => {
 
 process.on("SIGTERM", gracefulShutdown);
 process.on("SIGINT", gracefulShutdown);
+
+export default app;
