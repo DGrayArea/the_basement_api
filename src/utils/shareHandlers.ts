@@ -20,9 +20,9 @@ export async function handleDepositAndCalculateShares(
   },
   redis: any
 ) {
-  const solToKeep = solAmount * 0.5;
+  const solToKeep = solAmount;
   const tokensFromSwap = solToKeep * poolState.currentPrice;
-  const swapFee = tokensFromSwap * 0.003;
+  const swapFee = tokensFromSwap * 0.01; //1% swap fee
   const tokensReceived = tokensFromSwap - swapFee;
 
   const contributionValue = solToKeep + tokensReceived / poolState.currentPrice;

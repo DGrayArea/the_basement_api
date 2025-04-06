@@ -8,7 +8,12 @@ import { config } from "dotenv";
 // } from "../utils/shares";
 import DLMM from "../src";
 import redis from "../src/utils/redis";
-import { getActiveBin } from "../src/examples/example";
+import {
+  addLiquidityToExistingPosition,
+  getActiveBin,
+  getPositionsState,
+  removeSinglePositionLiquidity,
+} from "../src/examples/example";
 import { wSOl } from "../src/utils";
 import {
   autoCompoundRewards,
@@ -72,55 +77,58 @@ app.post("/dlmm/stake", async (req, res) => {
   });
 
   const activeBin = await getActiveBin(dlmmPool);
-  const newOneSidePosition = new Keypair();
+  const position = await getPositionsState(dlmmPool);
 
   const swapYToX = dlmmPool.tokenY.publicKey.equals(new PublicKey(wSOl));
 
+  const activeBinPricePerToken = dlmmPool.fromPricePerLamport(
+    Number(activeBin.price)
+  );
+
+  const amount = Number(req.body.amount) / 2;
+
   try {
-    // const swapResponse = await swap(
-    //   dlmmPool,
-    //   req.connect,
-    //   Number(req.body.swapAmount),
-    //   // req.body.swapYtoX
-    //   !swapYToX
-    // );
-    const swapResponse = true;
-    // await swapWithJupiter(
+    // const swapResponse = await swapWithJupiter(
     //   req.connect,
     //   req.body.tokenA,
     //   req.body.tokenB,
     //   req.body.swapAmount
     // );
+    const swapResponse = true;
+
     if (swapResponse) {
-      // const stakeResponse = await dlmmBalancePosition(
-      //   activeBin,
-      //   dlmmPool,
-      //   req.connect,
-      //   newOneSidePosition,
-      //   req.body.stakeAmount
-      // );
-      // return res.status(400).send({
-      //   swapResponse,
-      //   stakeResponse,
-      // });
-      let totalSOL = parseFloat(await redis.get("pool:totalSOL")) || 0;
-      let totalTokens = parseFloat(await redis.get("pool:totalTokens")) || 0;
-      const amount = Number(req.body.amount);
-      const poolState = {
-        currentPrice: Number(req.body.poolState.currentPrice),
-        totalSOL,
-        totalTokens,
-        poolId: req.body.poolState.poolId,
-      };
-      const shares = await handleDepositAndCalculateShares(
-        req.body.userPublicKey,
-        amount,
-        poolState,
-        req.redis
+      const stakeResponse = await addLiquidityToExistingPosition(
+        dlmmPool,
+        {
+          amount: amount / 2,
+          decimals: Number(req.body.decimals),
+        },
+        activeBin,
+        position[0]
       );
-      return res.status(200).send({
-        shares,
-      });
+      if (typeof stakeResponse === "object" && stakeResponse.error) {
+        return res.status(400).send({ error: swapResponse });
+      } else {
+        let totalSOL = parseFloat(await redis.get("pool:totalSOL")) || 0;
+        let totalTokens = parseFloat(await redis.get("pool:totalTokens")) || 0;
+
+        const poolState = {
+          currentPrice: Number(activeBinPricePerToken),
+          totalSOL,
+          totalTokens,
+          poolId: req.body.poolState.poolId,
+        };
+        const shares = await handleDepositAndCalculateShares(
+          req.body.userPublicKey,
+          amount,
+          poolState,
+          req.redis
+        );
+        return res.status(200).send({
+          stakeTx: stakeResponse,
+          shares,
+        });
+      }
     } else {
       return res.status(400).send({ error: swapResponse });
     }
@@ -132,23 +140,49 @@ app.post("/dlmm/stake", async (req, res) => {
 
 app.post("/dlmm/unstake", async (req, res) => {
   try {
-    const { userPublicKey, shares } = req.body;
+    const dlmmPool = await DLMM.create(req.connect, req.pool, {
+      cluster: "devnet",
+    });
+
+    const { userPublicKey, shares, unstakePercentage } = req.body;
+
+    const activeBin = await getActiveBin(dlmmPool);
+    const position = await getPositionsState(dlmmPool);
+
+    const swapYToX = dlmmPool.tokenY.publicKey.equals(new PublicKey(wSOl));
+
+    const activeBinPricePerToken = dlmmPool.fromPricePerLamport(
+      Number(activeBin.price)
+    );
+
+    const amountPercentage = Number(req.body.unstakePercentage);
 
     const poolState = {
-      currentPrice: Number(req.body.poolState.currentPrice),
+      currentPrice: Number(activeBinPricePerToken),
       totalSOL: parseFloat(await req.redis.get("pool:totalSOL")) || 0,
       totalTokens: parseFloat(await req.redis.get("pool:totalTokens")) || 0,
       poolId: req.body.poolState.poolId,
     };
 
-    const result = await handleWithdrawal(
-      userPublicKey,
-      parseFloat(shares),
-      poolState,
-      req.redis
+    const unstakeResponse = await removeSinglePositionLiquidity(
+      dlmmPool,
+      position,
+      position[0].publicKey,
+      amountPercentage
     );
 
-    return res.status(200).json(result);
+    if (typeof unstakeResponse === "object" && unstakeResponse.error) {
+      return res.status(400).send({ error: unstakeResponse });
+    } else {
+      const result = await handleWithdrawal(
+        userPublicKey,
+        parseFloat(shares),
+        poolState,
+        req.redis
+      );
+
+      return res.status(200).json({ unstakeResponse, result });
+    }
   } catch (err) {
     console.log(err);
     return res.status(400).json({ error: err.message });
