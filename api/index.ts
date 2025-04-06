@@ -22,6 +22,7 @@ import {
 } from "../src/utils/shareHandlers";
 import bodyParser from "body-parser";
 import cors from "cors";
+import winston from "winston";
 
 config();
 declare global {
@@ -34,6 +35,15 @@ declare global {
     }
   }
 }
+
+const logger = winston.createLogger({
+  level: "info",
+  format: winston.format.json(),
+  transports: [
+    new winston.transports.Console(),
+    new winston.transports.File({ filename: "error.log", level: "error" }),
+  ],
+});
 
 const app = express();
 app.use(
@@ -48,22 +58,50 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
 app.use(async function (req, res, next) {
-  // console.log(req.method, req.url);
-  // console.log(req.body);
+  try {
+    // console.log(req.method, req.url);
+    // console.log(req.body);
 
-  // req.pool = new PublicKey(req.headers.pool as string);
-  req.pool = new PublicKey("3amFSaAuShi4q7597yr8hvGC44Nck9zvGaT3HPToWHJq");
-  // req.rpc = req.headers.rpc as string;
-  req.rpc = "https://api.devnet.solana.com";
-  req.connect = new Connection(req.rpc, { commitment: "finalized" });
-  req.redis = redis;
+    // req.pool = new PublicKey(req.headers.pool as string);
+    req.pool = new PublicKey("3amFSaAuShi4q7597yr8hvGC44Nck9zvGaT3HPToWHJq");
+    // req.rpc = req.headers.rpc as string;
+    req.rpc = "https://api.devnet.solana.com";
+    req.connect = new Connection(req.rpc, {
+      commitment: "finalized",
+      httpHeaders: {
+        "Content-Type": "application/json",
+      },
+      fetchMiddleware: (url, options) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 300000); // 30 seconds timeout
 
-  next();
+        return fetch(url, {
+          ...options,
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timeout));
+      },
+    });
+    req.redis = redis;
+
+    next();
+  } catch (error) {
+    console.log(error);
+  }
 });
 
 app.get("/", async (req, res) => {
-  await req.redis.flushDb();
+  // await req.redis.flushDb();
   res.send("Hello World!");
+});
+
+app.get("/health", async (req, res) => {
+  try {
+    const version = await req.connect.getVersion();
+    res.status(200).json({ status: "ok", solanaVersion: version });
+  } catch (error) {
+    console.error("Health check failed:", error);
+    res.status(500).json({ status: "error", error: error.message });
+  }
 });
 
 export function safeStringify(obj: Record<string, any>): string {
@@ -111,7 +149,7 @@ app.post("/dlmm/stake", async (req, res) => {
       const stakeResponse = await addLiquidityToExistingPosition(
         dlmmPool,
         {
-          amount: amount / 2,
+          amount: amount,
           decimals: Number(req.body.decimals),
         },
         activeBin,
@@ -317,25 +355,29 @@ app.get("/dlmm/admin/pool-stats", async (req, res) => {
     let totalWithdrawnTokens = 0;
 
     // Fetch all user keys
-    const keys = await redis.keys("user:*");
+    const userData = [];
+    let cursor = "0";
 
-    // Fetch each user's data
-    const userData = await Promise.all(
-      keys.map(async (key: any) => {
-        const raw = await redis.get(key);
-        const data = JSON.parse(raw);
-        return {
-          wallet: key.replace("user:", ""),
-          ...data,
-          depositHistory: Array.isArray(data.depositHistory)
-            ? data.depositHistory
-            : JSON.parse(data.depositHistory || "[]"),
-          withdrawHistory: Array.isArray(data.withdrawHistory)
-            ? data.withdrawHistory
-            : JSON.parse(data.withdrawHistory || "[]"),
-        };
-      })
-    );
+    do {
+      const [nextCursor, keys] = await redis.scan(
+        cursor,
+        "MATCH",
+        "user:*",
+        "COUNT",
+        100
+      );
+      cursor = nextCursor;
+
+      const batchData = await Promise.all(
+        keys.map(async (key: any) => {
+          const raw = await redis.get(key);
+          const data = JSON.parse(raw);
+          return { wallet: key.replace("user:", ""), ...data };
+        })
+      );
+
+      userData.push(...batchData);
+    } while (cursor !== "0");
 
     userData.forEach((user: any) => {
       const withdrawals = Array.isArray(user.withdrawHistory)
@@ -371,18 +413,21 @@ const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+  logger.info("Server is running");
 });
 
 const gracefulShutdown = async () => {
   console.log("SIGTERM signal received: closing HTTP server");
 
   try {
-    () => {
-      console.log("HTTP server closed");
-      process.exit(0);
-    };
+    // if (req.redis) {
+    //   await req.redis.quit();
+    //   console.log("Redis connection closed");
+    // }
+    process.exit(0);
   } catch (error) {
     console.error("Error during shutdown:", error);
+    logger.error("Error occurred");
     process.exit(1);
   }
 };
