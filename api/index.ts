@@ -171,7 +171,7 @@ app.post("/dlmm/unstake", async (req, res) => {
       amountPercentage
     );
 
-    if (typeof unstakeResponse === "object" && unstakeResponse.error) {
+    if (!Array.isArray(unstakeResponse) && unstakeResponse.error) {
       return res.status(400).send({ error: unstakeResponse });
     } else {
       const result = await handleWithdrawal(
@@ -181,7 +181,9 @@ app.post("/dlmm/unstake", async (req, res) => {
         req.redis
       );
 
-      return res.status(200).json({ unstakeResponse, result });
+      return res
+        .status(200)
+        .json({ unstakeResponse: unstakeResponse[0], result });
     }
   } catch (err) {
     console.log(err);
