@@ -4,13 +4,7 @@ import { DLMM } from "../dlmm";
 import { BinArrayAccount, LbPosition } from "../dlmm/types";
 import { BN } from "bn.js";
 import { convertToPosition } from "./utils";
-import {
-  dlmmBalancePosition,
-  dlmmStake,
-  dlmmSwap,
-  swap,
-  swapWithJupiter,
-} from "../utils";
+import { swapWithJupiter, wSOl } from "../utils";
 import { getActiveBin } from "../examples/example";
 import { config } from "dotenv";
 import redis from "../utils/redis";
@@ -83,9 +77,7 @@ app.post("/dlmm/stake", async (req, res) => {
   const activeBin = await getActiveBin(dlmmPool);
   const newOneSidePosition = new Keypair();
 
-  const swapYToX = dlmmPool.tokenY.publicKey.equals(
-    new PublicKey("So11111111111111111111111111111111111111112")
-  );
+  const swapYToX = dlmmPool.tokenY.publicKey.equals(new PublicKey(wSOl));
 
   try {
     // const swapResponse = await swap(
