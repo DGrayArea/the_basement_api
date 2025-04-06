@@ -65,7 +65,7 @@ app.use(async function (req, res, next) {
     // req.pool = new PublicKey(req.headers.pool as string);
     req.pool = new PublicKey("3amFSaAuShi4q7597yr8hvGC44Nck9zvGaT3HPToWHJq");
     // req.rpc = req.headers.rpc as string;
-    req.rpc = "https://api.devnet.solana.com";
+    req.rpc = process.env.RPC || "https://api.devnet.solana.com";
     req.connect = new Connection(req.rpc, {
       commitment: "finalized",
       httpHeaders: {
