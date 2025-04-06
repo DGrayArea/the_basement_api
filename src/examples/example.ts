@@ -247,7 +247,7 @@ export async function addLiquidityToExistingPosition(
       connection,
       addLiquidityTx,
       [user],
-      { skipPreflight: false, preflightCommitment: "confirmed" }
+      { skipPreflight: false, preflightCommitment: "finalized" }
     );
     // console.log("🚀 ~ addLiquidityTxHash:", addLiquidityTxHash);
     return addLiquidityTxHash;
@@ -288,7 +288,7 @@ export async function removePositionLiquidity(
         connection,
         tx,
         [user],
-        { skipPreflight: false, preflightCommitment: "confirmed" }
+        { skipPreflight: false, preflightCommitment: "finalized" }
       );
       // console.log(
       //   "🚀 ~ removeBalanceLiquidityTxHash:",
@@ -335,7 +335,7 @@ export async function removeSinglePositionLiquidity(
           connection,
           tx,
           [user],
-          { skipPreflight: false, preflightCommitment: "confirmed" }
+          { skipPreflight: false, preflightCommitment: "finalized" }
         );
         // console.log(
         //   "🚀 ~ removeBalanceLiquidityTxHash:",
@@ -349,7 +349,7 @@ export async function removeSinglePositionLiquidity(
         connection,
         removeLiquidityTx,
         [user],
-        { skipPreflight: false, preflightCommitment: "confirmed" }
+        { skipPreflight: false, preflightCommitment: "finalized" }
       );
       // console.log(
       //   "🚀 ~ removeBalanceLiquidityTxHash:",
@@ -411,7 +411,7 @@ async function claimFee(dlmmPool: DLMM, position: LbPosition) {
       connection,
       claimFeeTx,
       [user],
-      { skipPreflight: false, preflightCommitment: "confirmed" }
+      { skipPreflight: false, preflightCommitment: "finalized" }
     );
     return claimFeeTxHash;
   } catch (error) {
