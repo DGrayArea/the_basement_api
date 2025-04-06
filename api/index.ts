@@ -65,22 +65,22 @@ app.use(async function (req, res, next) {
     // req.pool = new PublicKey(req.headers.pool as string);
     req.pool = new PublicKey("3amFSaAuShi4q7597yr8hvGC44Nck9zvGaT3HPToWHJq");
     // req.rpc = req.headers.rpc as string;
-    req.rpc = process.env.RPC || "https://api.devnet.solana.com";
-    req.connect = new Connection(req.rpc, {
-      commitment: "finalized",
-      httpHeaders: {
-        "Content-Type": "application/json",
-      },
-      fetchMiddleware: (url, options) => {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 300000); // 30 seconds timeout
+    // req.rpc = process.env.RPC || "https://api.devnet.solana.com";
+    // req.connect = new Connection(req.rpc, {
+    //   commitment: "finalized",
+    //   httpHeaders: {
+    //     "Content-Type": "application/json",
+    //   },
+    //   fetchMiddleware: (url, options) => {
+    //     const controller = new AbortController();
+    //     const timeout = setTimeout(() => controller.abort(), 300000); // 30 seconds timeout
 
-        return fetch(url, {
-          ...options,
-          signal: controller.signal,
-        }).finally(() => clearTimeout(timeout));
-      },
-    });
+    //     return fetch(url, {
+    //       ...options,
+    //       signal: controller.signal,
+    //     }).finally(() => clearTimeout(timeout));
+    //   },
+    // });
     req.redis = redis;
 
     next();
@@ -96,7 +96,7 @@ app.get("/", async (req, res) => {
 
 app.get("/health", async (req, res) => {
   try {
-    const version = await req.connect.getVersion();
+    const version = 1.0;
     res.status(200).json({ status: "ok", solanaVersion: version });
   } catch (error) {
     console.error("Health check failed:", error);
@@ -121,7 +121,13 @@ export function safeStringify(obj: Record<string, any>): string {
 }
 
 app.post("/dlmm/stake", async (req, res) => {
-  const dlmmPool = await DLMM.create(req.connect, req.pool, {
+  const connection = new Connection(
+    process.env.RPC || "https://api.devnet.solana.com",
+    {
+      commitment: "finalized",
+    }
+  );
+  const dlmmPool = await DLMM.create(connection, req.pool, {
     cluster: "devnet",
   });
 
@@ -189,7 +195,13 @@ app.post("/dlmm/stake", async (req, res) => {
 
 app.post("/dlmm/unstake", async (req, res) => {
   try {
-    const dlmmPool = await DLMM.create(req.connect, req.pool, {
+    const connection = new Connection(
+      process.env.RPC || "https://api.devnet.solana.com",
+      {
+        commitment: "finalized",
+      }
+    );
+    const dlmmPool = await DLMM.create(connection, req.pool, {
       cluster: "devnet",
     });
 
