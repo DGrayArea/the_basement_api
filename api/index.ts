@@ -134,6 +134,13 @@ app.post("/dlmm/stake", async (req, res) => {
   const activeBin = await getActiveBin(dlmmPool);
   const position = await getPositionsState(dlmmPool);
 
+  if (!activeBin) {
+    return res.status(400).json({ error: "No active bin found" });
+  }
+  if (!position || position.length === 0) {
+    return res.status(400).json({ error: "No positions found" });
+  }
+
   const swapYToX = dlmmPool.tokenY.publicKey.equals(new PublicKey(wSOl));
 
   const activeBinPricePerToken = dlmmPool.fromPricePerLamport(
@@ -162,7 +169,7 @@ app.post("/dlmm/stake", async (req, res) => {
         position[0]
       );
       if (typeof stakeResponse === "object" && stakeResponse.error) {
-        return res.status(400).send({ error: swapResponse });
+        return res.status(400).send({ error: stakeResponse.error });
       } else {
         let totalSOL = parseFloat(await redis.get("pool:totalSOL")) || 0;
         let totalTokens = parseFloat(await redis.get("pool:totalTokens")) || 0;
@@ -171,7 +178,7 @@ app.post("/dlmm/stake", async (req, res) => {
           currentPrice: Number(activeBinPricePerToken),
           totalSOL,
           totalTokens,
-          poolId: req.body.poolState.poolId,
+          poolId: req.pool,
         };
         const shares = await handleDepositAndCalculateShares(
           req.body.userPublicKey,
@@ -207,8 +214,21 @@ app.post("/dlmm/unstake", async (req, res) => {
 
     const { userPublicKey, shares, unstakePercentage } = req.body;
 
+    const amountPercentage = Number(unstakePercentage);
+
+    if (amountPercentage <= 0 || amountPercentage > 100) {
+      return res.status(400).json({ error: "Invalid unstake percentage" });
+    }
+
     const activeBin = await getActiveBin(dlmmPool);
     const position = await getPositionsState(dlmmPool);
+
+    if (!activeBin) {
+      return res.status(400).json({ error: "No active bin found" });
+    }
+    if (!position || position.length === 0) {
+      return res.status(400).json({ error: "No positions found" });
+    }
 
     const swapYToX = dlmmPool.tokenY.publicKey.equals(new PublicKey(wSOl));
 
@@ -216,13 +236,11 @@ app.post("/dlmm/unstake", async (req, res) => {
       Number(activeBin.price)
     );
 
-    const amountPercentage = Number(req.body.unstakePercentage);
-
     const poolState = {
       currentPrice: Number(activeBinPricePerToken),
       totalSOL: parseFloat(await req.redis.get("pool:totalSOL")) || 0,
       totalTokens: parseFloat(await req.redis.get("pool:totalTokens")) || 0,
-      poolId: req.body.poolState.poolId,
+      poolId: req.pool,
     };
 
     const unstakeResponse = await removeSinglePositionLiquidity(
@@ -233,7 +251,7 @@ app.post("/dlmm/unstake", async (req, res) => {
     );
 
     if (!Array.isArray(unstakeResponse) && unstakeResponse.error) {
-      return res.status(400).send({ error: unstakeResponse });
+      return res.status(400).send({ error: unstakeResponse.error });
     } else {
       const result = await handleWithdrawal(
         userPublicKey,
