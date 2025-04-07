@@ -250,3 +250,9 @@ export async function swapWithJupiter(
     return { error: error };
   }
 }
+
+// Export safe operations
+export * from "./safeOperations";
+
+// Export error handling utilities
+export * from "./errorHandler";
