@@ -28,3 +28,14 @@ export interface StakeReq {
   pool: string;
   connect: string;
 }
+
+export interface TransactionState {
+  txId: string;
+  status: "pending" | "completed" | "failed";
+  type: "stake" | "unstake" | "compound";
+  params: any;
+  result?: any;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}

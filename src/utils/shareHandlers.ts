@@ -1,5 +1,5 @@
 import { calculateShares, updateUserShares } from "./shareAccounting";
-import { appendToHistory, trackAutoCompound } from "./tracking";
+import { appendToHistory, trackAutoCompound } from "../lib/tracking";
 
 const DEPOSIT_LOCK_HOURS = 7;
 const COMPOUND_INTERVAL_MS = 60 * 60 * 1000; // 1 hour

@@ -6,29 +6,23 @@ import { config } from "dotenv";
 //   handleDepositAndCalculateShares,
 //   handleWithdrawal,
 // } from "../utils/shares";
-import DLMM from "../src";
-import redis from "../src/utils/redis";
+import DLMM from "..";
+import redis from "../utils/redis";
 import {
   addLiquidityToExistingPosition,
   getActiveBin,
   getPositionsState,
   removeSinglePositionLiquidity,
-} from "../src/examples/example";
-import { wSOl } from "../src/lib";
+} from "../examples/example";
+import { wSOl } from "../lib";
 import {
   autoCompoundRewards,
   handleDepositAndCalculateShares,
   handleWithdrawal,
-} from "../src/utils/shareHandlers";
+} from "../utils/shareHandlers";
 import bodyParser from "body-parser";
 import cors from "cors";
 import winston from "winston";
-import { TransactionState } from "../src/types";
-import { v4 as uuidv4 } from "uuid";
-import {
-  processStakeTransaction,
-  processUnstakeTransaction,
-} from "../src/utils/functions/processing";
 
 config();
 declare global {
@@ -128,162 +122,169 @@ export function safeStringify(obj: Record<string, any>): string {
 
 app.post("/dlmm/stake", async (req, res) => {
   try {
-    const txId = uuidv4();
-
-    const txState: TransactionState = {
-      txId,
-      status: "pending",
-      type: "stake",
-      params: req.body,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
-    await req.redis.set(`tx:${txId}`, JSON.stringify(txState));
-
-    processStakeTransaction(txId, req.body, req.pool, req.redis).catch(
-      (error) => {
-        console.error(`Error processing stake transaction ${txId}:`, error);
+    const connection = new Connection(
+      process.env.RPC || "https://api.devnet.solana.com",
+      {
+        commitment: "confirmed",
       }
     );
+    const dlmmPool = await DLMM.create(connection, req.pool, {
+      cluster: "devnet",
+    });
 
-    return res.status(202).json({
-      txId,
-      message: "Transaction initiated, check status endpoint for results",
+    const activeBin = await getActiveBin(dlmmPool);
+    const position = await getPositionsState(dlmmPool);
+
+    const activeBinPricePerToken = dlmmPool.fromPricePerLamport(
+      Number(activeBin.price)
+    );
+
+    if (!activeBin) {
+      return res.status(400).json({ error: "No active bin found" });
+    }
+    if (!position || position.length === 0) {
+      return res.status(400).json({ error: "No positions found" });
+    }
+
+    const positionData = position[0].positionData;
+    const totalXAmount =
+      parseFloat(positionData.totalXAmount) / Math.pow(10, 6); // Token X
+    const totalYAmount =
+      parseFloat(positionData.totalYAmount) / Math.pow(10, 9); // SOL
+
+    const poolState = {
+      currentPrice: Number(activeBinPricePerToken),
+      totalSOL: totalYAmount,
+      totalTokens: totalXAmount,
+    };
+
+    const amount = Number(req.body.amount) / 2;
+
+    const stakeResponse = await addLiquidityToExistingPosition(
+      dlmmPool,
+      {
+        amount: amount,
+        decimals: Number(req.body.decimals),
+      },
+      activeBin,
+      position[0]
+    );
+
+    if (typeof stakeResponse === "object" && stakeResponse.error) {
+      return res.status(400).send({ error: stakeResponse.error });
+    }
+
+    const shares = await handleDepositAndCalculateShares(
+      req.body.userPublicKey,
+      amount,
+      poolState,
+      req.redis
+    );
+
+    return res.status(200).send({
+      stakeTx: stakeResponse,
+      shares,
     });
   } catch (error) {
-    console.error("Error initiating stake:", error);
+    console.error("Error in /dlmm/stake:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
 
 app.post("/dlmm/unstake", async (req, res) => {
   try {
-    const txId = uuidv4();
+    const connection = new Connection(
+      process.env.RPC || "https://api.devnet.solana.com",
+      {
+        commitment: "confirmed",
+      }
+    );
+    const dlmmPool = await DLMM.create(connection, req.pool, {
+      cluster: "devnet",
+    });
 
-    const txState: TransactionState = {
-      txId,
-      status: "pending",
-      type: "unstake",
-      params: req.body,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+    const { userPublicKey, unstakePercentage } = req.body;
+
+    const amountPercentage = Number(unstakePercentage);
+
+    if (amountPercentage <= 0 || amountPercentage > 100) {
+      return res.status(400).json({ error: "Invalid unstake percentage" });
+    }
+
+    const activeBin = await getActiveBin(dlmmPool);
+    const position = await getPositionsState(dlmmPool);
+
+    if (!activeBin) {
+      return res.status(400).json({ error: "No active bin found" });
+    }
+    if (!position || position.length === 0) {
+      return res.status(400).json({ error: "No positions found" });
+    }
+
+    const positionData = position[0].positionData;
+    const totalXAmount =
+      parseFloat(positionData.totalXAmount) / Math.pow(10, 6);
+    const totalYAmount =
+      parseFloat(positionData.totalYAmount) / Math.pow(10, 9);
+
+    const poolState = {
+      totalSOL: totalXAmount,
+      totalTokens: totalYAmount,
+      poolId: req.pool,
     };
 
-    await req.redis.set(`tx:${txId}`, JSON.stringify(txState));
+    // Fetch user data
+    const userKey = `user:${userPublicKey}`;
+    const userData = await req.redis.get(userKey);
+    if (!userData) {
+      return res.status(404).json({ error: "User not found" });
+    }
 
-    processUnstakeTransaction(txId, req.body, req.pool, req.redis).catch(
-      (error) => {
-        console.error(`Error processing unstake transaction ${txId}:`, error);
-      }
+    const user = JSON.parse(userData);
+    const userShares = parseFloat(user.sharePoints || "0");
+    const totalSharePoints =
+      parseFloat(await req.redis.get("pool:totalSharePoints")) || 0;
+
+    if (totalSharePoints === 0) {
+      return res.status(400).json({ error: "No shares in the pool" });
+    }
+
+    // Calculate user's ownership percentage in the pool
+    const userOwnershipPct = userShares / totalSharePoints;
+
+    // Calculate the effective withdrawal percentage relative to the pool
+    const effectiveWithdrawalPct = (userOwnershipPct * amountPercentage) / 100;
+
+    // Calculate withdrawal amounts
+    const withdrawSOL = poolState.totalSOL * effectiveWithdrawalPct;
+    const withdrawTokens = poolState.totalTokens * effectiveWithdrawalPct;
+
+    // Update user shares
+    const sharesToWithdraw = (userShares * amountPercentage) / 100;
+    const remainingShares = userShares - sharesToWithdraw;
+    user.sharePoints = remainingShares;
+    await req.redis.set(userKey, JSON.stringify(user));
+
+    // Call `removeSinglePositionLiquidity` with the effective percentage
+    const unstakeResponse = await removeSinglePositionLiquidity(
+      dlmmPool,
+      position,
+      position[0].publicKey,
+      effectiveWithdrawalPct * 100 // Convert to percentage
     );
 
-    return res.status(202).json({
-      txId,
-      message: "Transaction initiated, check status endpoint for results",
+    if (!Array.isArray(unstakeResponse) && unstakeResponse.error) {
+      return res.status(400).send({ error: unstakeResponse.error });
+    }
+
+    return res.status(200).json({
+      unstakeResponse: unstakeResponse[0],
+      withdrawSOL: withdrawSOL.toFixed(8),
+      withdrawTokens: withdrawTokens.toFixed(8),
+      remainingShares: remainingShares.toFixed(8),
     });
-  } catch (error) {
-    console.error("Error initiating unstake:", error);
-    return res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-app.get("/dlmm/transaction/:txId", async (req, res) => {
-  try {
-    const { txId } = req.params;
-
-    const txData = await req.redis.get(`tx:${txId}`);
-    if (!txData) {
-      return res.status(404).json({ error: "Transaction not found" });
-    }
-
-    const transaction = JSON.parse(txData) as TransactionState;
-
-    if (transaction.status === "pending") {
-      return res.status(200).json({
-        txId: transaction.txId,
-        status: "pending",
-        type: transaction.type,
-        createdAt: transaction.createdAt,
-        elapsedSeconds: Math.floor((Date.now() - transaction.createdAt) / 1000),
-      });
-    } else if (transaction.status === "completed") {
-      return res.status(200).json({
-        txId: transaction.txId,
-        status: "completed",
-        type: transaction.type,
-        result: transaction.result,
-        createdAt: transaction.createdAt,
-        completedAt: transaction.updatedAt,
-        processingTimeSeconds: Math.floor(
-          (transaction.updatedAt - transaction.createdAt) / 1000
-        ),
-      });
-    } else {
-      return res.status(200).json({
-        txId: transaction.txId,
-        status: "failed",
-        type: transaction.type,
-        error: transaction.error,
-        createdAt: transaction.createdAt,
-        failedAt: transaction.updatedAt,
-      });
-    }
-  } catch (error) {
-    console.error("Error checking transaction status:", error);
-    return res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-app.get("/dlmm/transactions/:userPublicKey", async (req, res) => {
-  try {
-    const { userPublicKey } = req.params;
-
-    // Get all transaction keys
-    const txKeys = await req.redis.keys("tx:*");
-    const transactions = [];
-
-    // Filter and process transactions
-    for (const key of txKeys) {
-      const txData = await req.redis.get(key);
-      if (txData) {
-        const tx = JSON.parse(txData) as TransactionState;
-
-        // Only include transactions for this user
-        if (tx.params.userPublicKey === userPublicKey) {
-          transactions.push({
-            txId: tx.txId,
-            type: tx.type,
-            status: tx.status,
-            createdAt: new Date(tx.createdAt).toISOString(),
-            updatedAt: new Date(tx.updatedAt).toISOString(),
-            // Include minimal details based on status
-            ...(tx.status === "completed"
-              ? {
-                  result:
-                    tx.type === "stake"
-                      ? { shares: tx.result.shares.shareData }
-                      : {
-                          withdrawSOL: tx.result.withdrawSOL,
-                          withdrawTokens: tx.result.withdrawTokens,
-                        },
-                }
-              : {}),
-            ...(tx.status === "failed" ? { error: tx.error } : {}),
-          });
-        }
-      }
-    }
-
-    // Sort transactions by creation date (newest first)
-    transactions.sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-
-    return res.status(200).json(transactions);
-  } catch (error) {
-    console.error("Error fetching user transactions:", error);
+  } catch (err) {
+    console.error("Error in /dlmm/unstake:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 });
