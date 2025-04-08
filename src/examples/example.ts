@@ -222,13 +222,13 @@ export async function addLiquidityToExistingPosition(
     maxBinId,
     StrategyType.Spot // can be StrategyType.Spot, StrategyType.BidAsk, StrategyType.Curve
   );
-  console.log(
-    minBinId,
-    maxBinId,
-    activeBinPricePerToken,
-    parseFloat(totalXAmount.toString()),
-    parseFloat(totalYAmount.toString())
-  );
+  // console.log(
+  //   minBinId,
+  //   maxBinId,
+  //   activeBinPricePerToken,
+  //   parseFloat(totalXAmount.toString()),
+  //   parseFloat(totalYAmount.toString())
+  // );
   // Add Liquidity to existing position
   const addLiquidityTx = await dlmmPool.addLiquidityByStrategy({
     positionPubKey: position.publicKey,
@@ -247,7 +247,7 @@ export async function addLiquidityToExistingPosition(
       connection,
       addLiquidityTx,
       [user],
-      { skipPreflight: false, preflightCommitment: "finalized" }
+      { skipPreflight: false, preflightCommitment: "confirmed" }
     );
     // console.log("🚀 ~ addLiquidityTxHash:", addLiquidityTxHash);
     return addLiquidityTxHash;
@@ -288,7 +288,7 @@ export async function removePositionLiquidity(
         connection,
         tx,
         [user],
-        { skipPreflight: false, preflightCommitment: "finalized" }
+        { skipPreflight: false, preflightCommitment: "confirmed" }
       );
       // console.log(
       //   "🚀 ~ removeBalanceLiquidityTxHash:",
@@ -299,7 +299,7 @@ export async function removePositionLiquidity(
   } catch (error) {
     console.log("🚀 ~ error:", JSON.parse(JSON.stringify(error)));
   }
-  console.log("🚀 ~ removeBalanceLiquidityTxHashs:", txHashes);
+  // console.log("🚀 ~ removeBalanceLiquidityTxHashs:", txHashes);
   return txHashes;
 }
 
@@ -335,7 +335,7 @@ export async function removeSinglePositionLiquidity(
           connection,
           tx,
           [user],
-          { skipPreflight: false, preflightCommitment: "finalized" }
+          { skipPreflight: false, preflightCommitment: "confirmed" }
         );
         // console.log(
         //   "🚀 ~ removeBalanceLiquidityTxHash:",
@@ -349,7 +349,7 @@ export async function removeSinglePositionLiquidity(
         connection,
         removeLiquidityTx,
         [user],
-        { skipPreflight: false, preflightCommitment: "finalized" }
+        { skipPreflight: false, preflightCommitment: "confirmed" }
       );
       // console.log(
       //   "🚀 ~ removeBalanceLiquidityTxHash:",
@@ -411,7 +411,7 @@ async function claimFee(dlmmPool: DLMM, position: LbPosition) {
       connection,
       claimFeeTx,
       [user],
-      { skipPreflight: false, preflightCommitment: "finalized" }
+      { skipPreflight: false, preflightCommitment: "confirmed" }
     );
     return claimFeeTxHash;
   } catch (error) {
@@ -443,8 +443,8 @@ async function main() {
   //   positions[0]
   // );
   // console.log("🚀 ~ addHash:", adddHash);
-  const claimTx = await claimFee(dlmmPool, positions[0]);
-  console.log("🚀 ~ claimTx:", claimTx);
+  // const claimTx = await claimFee(dlmmPool, positions[0]);
+  // console.log("🚀 ~ claimTx:", claimTx);
   // const removeHash = await removeSinglePositionLiquidity(
   //   dlmmPool,
   //   positions,
@@ -455,4 +455,4 @@ async function main() {
   // await removePositionLiquidity(dlmmPool);
 }
 
-main();
+// main();

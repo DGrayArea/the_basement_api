@@ -20,32 +20,48 @@ export async function handleDepositAndCalculateShares(
   },
   redis: any
 ) {
+  // Validate input
+  if (solAmount <= 0) {
+    throw new Error("Invalid deposit amount");
+  }
+
+  // Calculate tokens received from the swap
   const solToKeep = solAmount;
   const tokensFromSwap = solToKeep * poolState.currentPrice;
-  const swapFee = tokensFromSwap * 0.01; //1% swap fee
+  const swapFee = tokensFromSwap * 0.01; // 1% swap fee
   const tokensReceived = tokensFromSwap - swapFee;
 
+  if (tokensReceived <= 0) {
+    throw new Error("Invalid token amount received from swap");
+  }
+
+  // Calculate contribution value and pool value before deposit
   const contributionValue = solToKeep + tokensReceived / poolState.currentPrice;
   const lpValueBefore =
     poolState.totalSOL + poolState.totalTokens / poolState.currentPrice;
 
+  // Fetch total share points from Redis
   let totalSharePoints =
     parseFloat(await redis.get("pool:totalSharePoints")) || 0;
 
+  // Calculate new share points for the user
   const sharePoints = calculateShares(
     contributionValue,
     lpValueBefore,
     totalSharePoints
   );
 
+  // Update pool state
   const totalSOL = poolState.totalSOL + solToKeep;
   const totalTokens = poolState.totalTokens + tokensReceived;
   const updatedSharePoints = totalSharePoints + sharePoints;
 
+  // Fetch user data from Redis
   const userKey = `user:${walletAddress}`;
   const userData = await redis.get(userKey);
   const user = userData ? JSON.parse(userData) : null;
 
+  // Calculate updated user data
   const oldShares = parseFloat(user?.sharePoints || "0");
   const oldDeposited = parseFloat(user?.totalDeposited || "0");
   const oldEntryPrice = parseFloat(user?.entryPrice || "0");
@@ -59,8 +75,10 @@ export async function handleDepositAndCalculateShares(
     poolState.currentPrice
   );
 
+  // Set lock period for the deposit
   const lockUntil = Date.now() + DEPOSIT_LOCK_HOURS * 60 * 60 * 1000;
 
+  // Update user data in Redis
   await redis.set(
     userKey,
     JSON.stringify({
@@ -79,12 +97,15 @@ export async function handleDepositAndCalculateShares(
     })
   );
 
+  // Update pool state in Redis
   await redis.set("pool:totalSOL", totalSOL.toFixed(8));
   await redis.set("pool:totalTokens", totalTokens.toFixed(8));
   await redis.set("pool:totalSharePoints", updatedSharePoints.toFixed(8));
 
+  // Increment total deposits for stats
   await incrementTotalDeposits(redis, "stats:totalDeposits", solAmount);
 
+  // Return updated data
   return {
     shareData: {
       ...updatedUser,

@@ -121,82 +121,73 @@ export function safeStringify(obj: Record<string, any>): string {
 }
 
 app.post("/dlmm/stake", async (req, res) => {
-  const connection = new Connection(
-    process.env.RPC || "https://api.devnet.solana.com",
-    {
-      commitment: "finalized",
-    }
-  );
-  const dlmmPool = await DLMM.create(connection, req.pool, {
-    cluster: "devnet",
-  });
-
-  const activeBin = await getActiveBin(dlmmPool);
-  const position = await getPositionsState(dlmmPool);
-
-  if (!activeBin) {
-    return res.status(400).json({ error: "No active bin found" });
-  }
-  if (!position || position.length === 0) {
-    return res.status(400).json({ error: "No positions found" });
-  }
-
-  const swapYToX = dlmmPool.tokenY.publicKey.equals(new PublicKey(wSOl));
-
-  const activeBinPricePerToken = dlmmPool.fromPricePerLamport(
-    Number(activeBin.price)
-  );
-
-  const amount = Number(req.body.amount) / 2;
-
   try {
-    // const swapResponse = await swapWithJupiter(
-    //   req.connect,
-    //   req.body.tokenA,
-    //   req.body.tokenB,
-    //   req.body.swapAmount
-    // );
-    const swapResponse = true;
-
-    if (swapResponse) {
-      const stakeResponse = await addLiquidityToExistingPosition(
-        dlmmPool,
-        {
-          amount: amount,
-          decimals: Number(req.body.decimals),
-        },
-        activeBin,
-        position[0]
-      );
-      if (typeof stakeResponse === "object" && stakeResponse.error) {
-        return res.status(400).send({ error: stakeResponse.error });
-      } else {
-        let totalSOL = parseFloat(await redis.get("pool:totalSOL")) || 0;
-        let totalTokens = parseFloat(await redis.get("pool:totalTokens")) || 0;
-
-        const poolState = {
-          currentPrice: Number(activeBinPricePerToken),
-          totalSOL,
-          totalTokens,
-          poolId: req.pool,
-        };
-        const shares = await handleDepositAndCalculateShares(
-          req.body.userPublicKey,
-          amount,
-          poolState,
-          req.redis
-        );
-        return res.status(200).send({
-          stakeTx: stakeResponse,
-          shares,
-        });
+    const connection = new Connection(
+      process.env.RPC || "https://api.devnet.solana.com",
+      {
+        commitment: "confirmed",
       }
-    } else {
-      return res.status(400).send({ error: swapResponse });
+    );
+    const dlmmPool = await DLMM.create(connection, req.pool, {
+      cluster: "devnet",
+    });
+
+    const activeBin = await getActiveBin(dlmmPool);
+    const position = await getPositionsState(dlmmPool);
+
+    const activeBinPricePerToken = dlmmPool.fromPricePerLamport(
+      Number(activeBin.price)
+    );
+
+    if (!activeBin) {
+      return res.status(400).json({ error: "No active bin found" });
     }
+    if (!position || position.length === 0) {
+      return res.status(400).json({ error: "No positions found" });
+    }
+
+    const positionData = position[0].positionData;
+    const totalXAmount =
+      parseFloat(positionData.totalXAmount) / Math.pow(10, 6); // Token X
+    const totalYAmount =
+      parseFloat(positionData.totalYAmount) / Math.pow(10, 9); // SOL
+
+    const poolState = {
+      currentPrice: Number(activeBinPricePerToken),
+      totalSOL: totalYAmount,
+      totalTokens: totalXAmount,
+    };
+
+    const amount = Number(req.body.amount) / 2;
+
+    const stakeResponse = await addLiquidityToExistingPosition(
+      dlmmPool,
+      {
+        amount: amount,
+        decimals: Number(req.body.decimals),
+      },
+      activeBin,
+      position[0]
+    );
+
+    if (typeof stakeResponse === "object" && stakeResponse.error) {
+      return res.status(400).send({ error: stakeResponse.error });
+    }
+
+    const shares = await handleDepositAndCalculateShares(
+      req.body.userPublicKey,
+      amount,
+      poolState,
+      req.redis
+    );
+
+    return res.status(200).send({
+      stakeTx: stakeResponse,
+      shares,
+    });
   } catch (error) {
-    console.log(error);
-    return res.status(400).send(error);
+    console.error("Error in /dlmm/stake:", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -205,14 +196,14 @@ app.post("/dlmm/unstake", async (req, res) => {
     const connection = new Connection(
       process.env.RPC || "https://api.devnet.solana.com",
       {
-        commitment: "finalized",
+        commitment: "confirmed",
       }
     );
     const dlmmPool = await DLMM.create(connection, req.pool, {
       cluster: "devnet",
     });
 
-    const { userPublicKey, shares, unstakePercentage } = req.body;
+    const { userPublicKey, unstakePercentage } = req.body;
 
     const amountPercentage = Number(unstakePercentage);
 
@@ -230,43 +221,71 @@ app.post("/dlmm/unstake", async (req, res) => {
       return res.status(400).json({ error: "No positions found" });
     }
 
-    const swapYToX = dlmmPool.tokenY.publicKey.equals(new PublicKey(wSOl));
-
-    const activeBinPricePerToken = dlmmPool.fromPricePerLamport(
-      Number(activeBin.price)
-    );
+    const positionData = position[0].positionData;
+    const totalXAmount =
+      parseFloat(positionData.totalXAmount) / Math.pow(10, 6);
+    const totalYAmount =
+      parseFloat(positionData.totalYAmount) / Math.pow(10, 9);
 
     const poolState = {
-      currentPrice: Number(activeBinPricePerToken),
-      totalSOL: parseFloat(await req.redis.get("pool:totalSOL")) || 0,
-      totalTokens: parseFloat(await req.redis.get("pool:totalTokens")) || 0,
+      totalSOL: totalXAmount,
+      totalTokens: totalYAmount,
       poolId: req.pool,
     };
 
+    // Fetch user data
+    const userKey = `user:${userPublicKey}`;
+    const userData = await req.redis.get(userKey);
+    if (!userData) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const user = JSON.parse(userData);
+    const userShares = parseFloat(user.sharePoints || "0");
+    const totalSharePoints =
+      parseFloat(await req.redis.get("pool:totalSharePoints")) || 0;
+
+    if (totalSharePoints === 0) {
+      return res.status(400).json({ error: "No shares in the pool" });
+    }
+
+    // Calculate user's ownership percentage in the pool
+    const userOwnershipPct = userShares / totalSharePoints;
+
+    // Calculate the effective withdrawal percentage relative to the pool
+    const effectiveWithdrawalPct = (userOwnershipPct * amountPercentage) / 100;
+
+    // Calculate withdrawal amounts
+    const withdrawSOL = poolState.totalSOL * effectiveWithdrawalPct;
+    const withdrawTokens = poolState.totalTokens * effectiveWithdrawalPct;
+
+    // Update user shares
+    const sharesToWithdraw = (userShares * amountPercentage) / 100;
+    const remainingShares = userShares - sharesToWithdraw;
+    user.sharePoints = remainingShares;
+    await req.redis.set(userKey, JSON.stringify(user));
+
+    // Call `removeSinglePositionLiquidity` with the effective percentage
     const unstakeResponse = await removeSinglePositionLiquidity(
       dlmmPool,
       position,
       position[0].publicKey,
-      amountPercentage
+      effectiveWithdrawalPct * 100 // Convert to percentage
     );
 
     if (!Array.isArray(unstakeResponse) && unstakeResponse.error) {
       return res.status(400).send({ error: unstakeResponse.error });
-    } else {
-      const result = await handleWithdrawal(
-        userPublicKey,
-        parseFloat(shares),
-        poolState,
-        req.redis
-      );
-
-      return res
-        .status(200)
-        .json({ unstakeResponse: unstakeResponse[0], result });
     }
+
+    return res.status(200).json({
+      unstakeResponse: unstakeResponse[0],
+      withdrawSOL: withdrawSOL.toFixed(8),
+      withdrawTokens: withdrawTokens.toFixed(8),
+      remainingShares: remainingShares.toFixed(8),
+    });
   } catch (err) {
-    console.log(err);
-    return res.status(400).json({ error: err.message });
+    console.error("Error in /dlmm/unstake:", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -292,23 +311,33 @@ app.post("/dlmm/admin/compound", async (req, res) => {
 
 app.get("/dlmm/user/:walletAddress", async (req, res) => {
   try {
+    const connection = new Connection(
+      process.env.RPC || "https://api.devnet.solana.com",
+      {
+        commitment: "confirmed",
+      }
+    );
+
     const walletAddress = req.params.walletAddress;
-    const redis = req.redis;
+    const dlmmPool = await DLMM.create(connection, req.pool, {
+      cluster: "devnet",
+    });
 
-    // Fetch pool state
-    const totalSOL = parseFloat(await redis.get("pool:totalSOL")) || 0;
-    const totalTokens = parseFloat(await redis.get("pool:totalTokens")) || 0;
-    const totalSharePoints =
-      parseFloat(await redis.get("pool:totalSharePoints")) || 0;
-
-    const currentPrice = parseFloat(req.query.currentPrice as string); // e.g. /user/<wallet>?currentPrice=125
-    if (!currentPrice || isNaN(currentPrice)) {
-      return res.status(400).json({ error: "Missing or invalid currentPrice" });
+    // Fetch user's positions
+    const positions = await getPositionsState(dlmmPool);
+    if (!positions || positions.length === 0) {
+      return res.status(404).json({ error: "No positions found for user" });
     }
 
-    // Get user data
+    // Calculate pool totals from position data
+
+    const positionData = positions[0].positionData;
+    const totalTokens = parseFloat(positionData.totalXAmount) / Math.pow(10, 6); // Token X
+    const totalSOL = parseFloat(positionData.totalYAmount) / Math.pow(10, 9); // SOL
+
+    // Fetch user's share points
     const userKey = `user:${walletAddress}`;
-    const userData = await redis.get(userKey);
+    const userData = await req.redis.get(userKey);
     if (!userData) {
       return res.status(404).json({ error: "User not found" });
     }
@@ -316,14 +345,21 @@ app.get("/dlmm/user/:walletAddress", async (req, res) => {
     const user = JSON.parse(userData);
     const userShares = parseFloat(user.sharePoints || "0");
 
-    // Compute user % ownership and value
-    const ownershipPct =
-      totalSharePoints > 0 ? (userShares / totalSharePoints) * 100 : 0;
+    // Calculate total share points from Redis
+    const totalSharePoints =
+      parseFloat(await req.redis.get("pool:totalSharePoints")) || 0;
 
-    const poolValue = totalSOL + totalTokens / currentPrice;
+    if (totalSharePoints === 0) {
+      return res.status(400).json({ error: "No shares in the pool" });
+    }
 
+    // Calculate user's ownership percentage and value
+    const ownershipPct = (userShares / totalSharePoints) * 100;
+    const currentPrice = totalSOL / totalTokens; // SOL per token
+    const poolValue = totalSOL + totalTokens * currentPrice;
     const userValue = (ownershipPct / 100) * poolValue;
 
+    // Parse user's withdrawal history
     const parsedWithdrawHistory = Array.isArray(user.withdrawHistory)
       ? user.withdrawHistory
       : JSON.parse(user.withdrawHistory || "[]");
@@ -342,7 +378,7 @@ app.get("/dlmm/user/:walletAddress", async (req, res) => {
         totalSOL: totalSOL.toFixed(8),
         totalTokens: totalTokens.toFixed(8),
         totalSharePoints: totalSharePoints.toFixed(8),
-        currentPrice,
+        currentPrice: currentPrice.toFixed(8),
         poolValue: poolValue.toFixed(8),
       },
       user: {
@@ -366,48 +402,50 @@ app.get("/dlmm/user/:walletAddress", async (req, res) => {
 
 app.get("/dlmm/admin/pool-stats", async (req, res) => {
   try {
-    const redis = req.redis;
+    const dlmmPool = await DLMM.create(req.connect, req.pool, {
+      cluster: "devnet",
+    });
 
-    // Fetch pool-wide state
-    const [totalSOL, totalTokens, totalSharePoints] = await Promise.all([
-      parseFloat(await redis.get("pool:totalSOL")) || 0,
-      parseFloat(await redis.get("pool:totalTokens")) || 0,
-      parseFloat(await redis.get("pool:totalSharePoints")) || 0,
-    ]);
+    // Fetch all user positions
+    const positions = await getPositionsState(dlmmPool);
 
-    const [feeSOL, feeTokens] = await Promise.all([
-      parseFloat(await redis.get("pool:feeSOL")) || 0,
-      parseFloat(await redis.get("pool:feeTokens")) || 0,
-    ]);
+    if (!positions || positions.length === 0) {
+      return res.status(404).json({ error: "No positions found in the pool" });
+    }
+
+    // Calculate pool totals from position data
+    const positionData = positions[0].positionData;
+    const totalTokens = parseFloat(positionData.totalXAmount) / Math.pow(10, 6); // Token X
+    const totalSOL = parseFloat(positionData.totalYAmount) / Math.pow(10, 9); // SOL
+
+    // Fetch total share points from Redis
+    const totalSharePoints =
+      parseFloat(await req.redis.get("pool:totalSharePoints")) || 0;
+
+    // Fetch all user keys
+    const keys = await req.redis.keys("user:*");
+
+    // Fetch each user's data
+    const userData = await Promise.all(
+      keys.map(async (key: any) => {
+        const raw = await req.redis.get(key);
+        const data = JSON.parse(raw);
+        return {
+          wallet: key.replace("user:", ""),
+          ...data,
+          depositHistory: Array.isArray(data.depositHistory)
+            ? data.depositHistory
+            : JSON.parse(data.depositHistory || "[]"),
+          withdrawHistory: Array.isArray(data.withdrawHistory)
+            ? data.withdrawHistory
+            : JSON.parse(data.withdrawHistory || "[]"),
+        };
+      })
+    );
 
     // Compute total withdrawals
     let totalWithdrawnSOL = 0;
     let totalWithdrawnTokens = 0;
-
-    // Fetch all user keys
-    const userData = [];
-    let cursor = "0";
-
-    do {
-      const [nextCursor, keys] = await redis.scan(
-        cursor,
-        "MATCH",
-        "user:*",
-        "COUNT",
-        100
-      );
-      cursor = nextCursor;
-
-      const batchData = await Promise.all(
-        keys.map(async (key: any) => {
-          const raw = await redis.get(key);
-          const data = JSON.parse(raw);
-          return { wallet: key.replace("user:", ""), ...data };
-        })
-      );
-
-      userData.push(...batchData);
-    } while (cursor !== "0");
 
     userData.forEach((user: any) => {
       const withdrawals = Array.isArray(user.withdrawHistory)
@@ -423,11 +461,9 @@ app.get("/dlmm/admin/pool-stats", async (req, res) => {
     // Respond with the full data
     return res.status(200).json({
       pool: {
-        totalSOL,
-        totalTokens,
-        totalSharePoints,
-        feeSOL: feeSOL.toFixed(8),
-        feeTokens: feeTokens.toFixed(8),
+        totalSOL: totalSOL.toFixed(8),
+        totalTokens: totalTokens.toFixed(8),
+        totalSharePoints: totalSharePoints.toFixed(8),
         totalWithdrawnSOL: totalWithdrawnSOL.toFixed(8),
         totalWithdrawnTokens: totalWithdrawnTokens.toFixed(8),
       },
@@ -438,7 +474,6 @@ app.get("/dlmm/admin/pool-stats", async (req, res) => {
     return res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
