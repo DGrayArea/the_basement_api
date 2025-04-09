@@ -67,6 +67,19 @@ export async function processStakeTransaction(
       totalTokens: totalXAmount,
     };
 
+    // ✅ Check and initialize totalSharePoints if not already set
+    const lpValueBefore =
+      poolState.totalSOL + poolState.totalTokens / poolState.currentPrice;
+
+    const shareKey = "pool:totalSharePoints";
+    let totalSharePoints = parseFloat(await redisClient.get(shareKey)) || 0;
+
+    if (totalSharePoints === 0 && lpValueBefore > 0) {
+      totalSharePoints = lpValueBefore;
+      await redisClient.set(shareKey, totalSharePoints.toFixed(8));
+    }
+
+    // 💧 Add liquidity to DLMM
     const amount = Number(params.amount) / 2;
 
     const stakeResponse = await addLiquidityToExistingPosition(
@@ -203,8 +216,25 @@ export async function processUnstakeTransaction(
     const sharesToWithdraw = (userShares * amountPercentage) / 100;
     const remainingShares = userShares - sharesToWithdraw;
     user.sharePoints = remainingShares;
+
+    // Update user's withdrawal history
+    const withdrawalEntry = {
+      date: new Date().toISOString(),
+      receivedSOL: withdrawSOL.toFixed(8),
+      receivedTokens: withdrawTokens.toFixed(8),
+      sharesWithdrawn: sharesToWithdraw.toFixed(8),
+    };
+
+    const updatedWithdrawHistory = Array.isArray(user.withdrawHistory)
+      ? [...user.withdrawHistory, withdrawalEntry]
+      : [withdrawalEntry];
+
+    user.withdrawHistory = updatedWithdrawHistory;
+
+    // Save updated user data to Redis
     await redisClient.set(userKey, JSON.stringify(user));
     await sleep(200);
+
     // Call `removeSinglePositionLiquidity` with the effective percentage
     const unstakeResponse = await removeSinglePositionLiquidity(
       dlmmPool,

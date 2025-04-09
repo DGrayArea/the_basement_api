@@ -63,6 +63,17 @@ app.get("/", async (req, res) => {
   res.json({ message: "Hello World!" });
 });
 
+app.get("/health", async (req, res) => {
+  try {
+    const version = 1.0;
+    await req.redis.ping();
+    res.status(200).json({ status: "ok", solanaVersion: version });
+  } catch (error) {
+    console.error("Health check failed:", error);
+    res.status(500).json({ status: "error", error: error.message });
+  }
+});
+
 export function safeStringify(obj: Record<string, any>): string {
   const seen = new WeakSet();
   return JSON.stringify(obj, (key, value) => {
@@ -308,7 +319,7 @@ app.get("/dlmm/user/:walletAddress", async (req, res) => {
     // Calculate user's ownership percentage and value
     const ownershipPct = (userShares / totalSharePoints) * 100;
     const currentPrice = totalSOL / totalTokens; // SOL per token
-    const poolValue = totalSOL + totalTokens * currentPrice;
+    const poolValue = totalSOL + totalTokens / currentPrice;
     const userValue = (ownershipPct / 100) * poolValue;
 
     // Parse user's withdrawal history
@@ -342,8 +353,8 @@ app.get("/dlmm/user/:walletAddress", async (req, res) => {
         entryPrice: user.entryPrice,
         depositHistory: user.depositHistory,
         withdrawHistory: parsedWithdrawHistory,
-        totalWithdrawnSOL: totalWithdrawnSOL.toFixed(8),
-        totalWithdrawnTokens: totalWithdrawnTokens.toFixed(8),
+        totalWithdrawnSOL: Number(totalWithdrawnSOL).toFixed(8),
+        totalWithdrawnTokens: Number(totalWithdrawnTokens).toFixed(8),
       },
     });
   } catch (err) {
