@@ -1,4 +1,10 @@
-import { Connection, PublicKey } from "@solana/web3.js";
+import {
+  Connection,
+  PublicKey,
+  sendAndConfirmTransaction,
+  SystemProgram,
+  Transaction,
+} from "@solana/web3.js";
 import { config } from "dotenv";
 import { DLMM } from "../../dlmm";
 import {
@@ -9,6 +15,12 @@ import {
 } from "../../examples/example";
 import { handleDepositAndCalculateShares } from "../shareHandlers";
 import { TransactionState } from "../../types";
+import {
+  createAssociatedTokenAccountInstruction,
+  createTransferInstruction,
+  getAssociatedTokenAddress,
+} from "@solana/spl-token";
+import { user as userSigner } from "../../examples/example";
 
 config();
 
@@ -151,13 +163,13 @@ export async function processUnstakeTransaction(
 
     const positionData = position[0].positionData;
     const totalXAmount =
-      parseFloat(positionData.totalXAmount) / Math.pow(10, 6);
+      parseFloat(positionData.totalXAmount) / Math.pow(10, 6); // Tokens
     const totalYAmount =
-      parseFloat(positionData.totalYAmount) / Math.pow(10, 9);
+      parseFloat(positionData.totalYAmount) / Math.pow(10, 9); // SOL
 
     const poolState = {
-      totalSOL: totalXAmount,
-      totalTokens: totalYAmount,
+      totalSOL: totalYAmount,
+      totalTokens: totalXAmount,
       poolId,
     };
 
@@ -192,7 +204,7 @@ export async function processUnstakeTransaction(
     const remainingShares = userShares - sharesToWithdraw;
     user.sharePoints = remainingShares;
     await redisClient.set(userKey, JSON.stringify(user));
-
+    await sleep(200);
     // Call `removeSinglePositionLiquidity` with the effective percentage
     const unstakeResponse = await removeSinglePositionLiquidity(
       dlmmPool,
@@ -204,6 +216,70 @@ export async function processUnstakeTransaction(
     if (!Array.isArray(unstakeResponse) && unstakeResponse.error) {
       throw new Error(unstakeResponse.error);
     }
+
+    const userWallet = new PublicKey(userPublicKey);
+
+    const solLamports = Math.floor(withdrawSOL * Math.pow(10, 9));
+    const tokenAmount = Math.floor(withdrawTokens * Math.pow(10, 6));
+
+    const unifiedTx = new Transaction();
+
+    unifiedTx.add(
+      SystemProgram.transfer({
+        fromPubkey: userSigner.publicKey,
+        toPubkey: userWallet,
+        lamports: solLamports,
+      })
+    );
+
+    const tokenMint = new PublicKey(
+      "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"
+    );
+    await sleep(200);
+    // Find the user's ATA (Associated Token Account)
+    const userTokenATA = await getAssociatedTokenAddress(tokenMint, userWallet);
+
+    const poolTokenATA = await getAssociatedTokenAddress(
+      tokenMint,
+      userSigner.publicKey
+    );
+
+    // Check if user's ATA exists, if not create it
+    let ataInfo;
+    try {
+      ataInfo = await connection.getAccountInfo(userTokenATA);
+    } catch (e) {
+      ataInfo = null;
+    }
+    await sleep(200);
+    // Create ATA if it doesn't exist
+    if (!ataInfo) {
+      unifiedTx.add(
+        createAssociatedTokenAccountInstruction(
+          userSigner.publicKey,
+          userTokenATA,
+          userWallet,
+          tokenMint
+        )
+      );
+    }
+
+    // Transfer tokens
+    unifiedTx.add(
+      createTransferInstruction(
+        poolTokenATA,
+        userTokenATA,
+        userSigner.publicKey,
+        tokenAmount
+      )
+    );
+    await sleep(200);
+    // Sign and send transactions
+    const unifiedTxSignature = await sendAndConfirmTransaction(
+      connection,
+      unifiedTx,
+      [userSigner]
+    );
 
     // Update transaction state in Redis
     const txState: TransactionState = {
@@ -243,3 +319,5 @@ export async function processUnstakeTransaction(
     }
   }
 }
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
